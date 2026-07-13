@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aegis-insurance-protocol"
+version = "1.0.0"
+description = "Vyper DeFi insurance market with Python tests and actuarial support tooling."
+readme = "README.md"
+requires-python = ">=3.13"
+license = "MIT"
+dependencies = [
+  "titanoboa==0.2.8",
+  "vyper==0.4.3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.4.2",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["aegis_protocol*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.compileall]
+quiet = 1
