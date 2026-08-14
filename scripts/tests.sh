@@ -25,4 +25,5 @@ find_python() {
 PYTHON="$(find_python)"
 
 "${PYTHON}" -m vyper -f abi src/AegisInsuranceProtocol.vy >/dev/null
+"${PYTHON}" scripts/check_contract_size.py
 "${PYTHON}" -m pytest

@@ -1,4 +1,5 @@
 # pragma version 0.4.3
+# pragma optimize codesize
 
 BPS_DENOMINATOR: constant(uint256) = 10_000
 SECONDS_PER_DAY: constant(uint256) = 86_400
@@ -30,6 +31,7 @@ ROLE_NONE: constant(uint256) = 0
 ROLE_REVIEWER: constant(uint256) = 1
 ROLE_ROUTER: constant(uint256) = 2
 ROLE_KEEPER: constant(uint256) = 3
+ROLE_GUARDIAN: constant(uint256) = 4
 
 struct Pool:
     sponsor: address
@@ -168,6 +170,15 @@ event RoleUpdated:
     account: indexed(address)
     role: indexed(uint256)
     enabled: bool
+
+event PauseUpdated:
+    account: indexed(address)
+    is_paused: bool
+
+event PoolStatusUpdated:
+    pool_id: indexed(uint256)
+    previous_status: uint256
+    new_status: uint256
 
 event EpochRecorded:
     epoch_id: indexed(uint256)
@@ -443,14 +454,23 @@ def set_treasury(new_treasury: address):
 
 @external
 def set_paused(is_paused: bool):
-    assert msg.sender == self.owner, "owner only"
+    if is_paused:
+        assert msg.sender == self.owner or self._has_role(msg.sender, ROLE_GUARDIAN), "pause authority"
+    else:
+        assert msg.sender == self.owner, "owner only"
     self.paused = is_paused
+    log PauseUpdated(account=msg.sender, is_paused=is_paused)
 
 @external
 def set_role(account: address, role: uint256, enabled: bool):
     assert msg.sender == self.owner, "owner only"
     assert account != empty(address), "account required"
-    assert role == ROLE_REVIEWER or role == ROLE_ROUTER or role == ROLE_KEEPER, "role invalid"
+    assert (
+        role == ROLE_REVIEWER
+        or role == ROLE_ROUTER
+        or role == ROLE_KEEPER
+        or role == ROLE_GUARDIAN
+    ), "role invalid"
     self.roles[account][role] = enabled
     log RoleUpdated(account=account, role=role, enabled=enabled)
 
@@ -491,18 +511,20 @@ def create_pool(
 
 @external
 def set_pool_status(pool_id: uint256, status: uint256):
-    assert msg.sender == self.owner or msg.sender == self.pools[pool_id].sponsor, "pool authority"
     assert self._pool_exists(pool_id), "pool missing"
+    assert msg.sender == self.owner or msg.sender == self.pools[pool_id].sponsor, "pool authority"
     assert status == POOL_ACTIVE or status == POOL_PAUSED or status == POOL_INACTIVE, "status invalid"
+    previous_status: uint256 = self.pools[pool_id].status
     self.pools[pool_id].status = status
     self.pools[pool_id].updated_at = block.timestamp
+    log PoolStatusUpdated(pool_id=pool_id, previous_status=previous_status, new_status=status)
 
 @external
 def set_pool_limits(
     pool_id: uint256, min_capital: uint256, max_utilization_bps: uint256, retention_bps: uint256
 ):
-    assert msg.sender == self.owner or msg.sender == self.pools[pool_id].sponsor, "pool authority"
     assert self._pool_exists(pool_id), "pool missing"
+    assert msg.sender == self.owner or msg.sender == self.pools[pool_id].sponsor, "pool authority"
     assert max_utilization_bps > 0 and max_utilization_bps <= BPS_DENOMINATOR, "utilization invalid"
     assert retention_bps <= BPS_DENOMINATOR, "retention invalid"
     self.pools[pool_id].min_capital = min_capital
@@ -574,6 +596,8 @@ def withdraw_capital(pool_id: uint256, amount: uint256, receiver: address):
     assert receiver != empty(address), "receiver required"
     assert self.pool_shares[pool_id][msg.sender] >= amount, "shares low"
     assert self._free_capital(pool_id) >= amount, "capital locked"
+    capital_after: uint256 = self.pools[pool_id].total_capital - amount
+    assert capital_after == 0 or capital_after >= self.pools[pool_id].min_capital, "capital floor"
 
     self.pool_shares[pool_id][msg.sender] -= amount
     self.pools[pool_id].total_capital -= amount
@@ -672,6 +696,9 @@ def transfer_policy_exposure(policy_id: uint256, to_pool_id: uint256, amount: ui
     assert policy.pool_id != to_pool_id, "same pool"
     assert block.timestamp < policy.expiration_time, "policy expired"
     assert policy.retained_exposure >= amount, "retention low"
+    retained_after: uint256 = policy.retained_exposure - amount
+    minimum_retained: uint256 = policy.coverage * self.pools[policy.pool_id].retention_bps // BPS_DENOMINATOR
+    assert retained_after >= minimum_retained, "retention policy"
 
     self._lock_pool_exposure(to_pool_id, amount)
     self._release_pool_exposure(policy.pool_id, amount)
@@ -931,7 +958,10 @@ def pool_can_withdraw(pool_id: uint256, provider: address, amount: uint256) -> b
         return False
     if self.pool_shares[pool_id][provider] < amount:
         return False
-    return self._free_capital(pool_id) >= amount
+    if self._free_capital(pool_id) < amount:
+        return False
+    capital_after: uint256 = self.pools[pool_id].total_capital - amount
+    return capital_after == 0 or capital_after >= self.pools[pool_id].min_capital
 
 @external
 @view

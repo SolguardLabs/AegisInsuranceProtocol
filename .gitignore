@@ -25,6 +25,3 @@ dist/
 # Sistema operativo
 .DS_Store
 Thumbs.db
-
-# Documentación interna
-vulnerability.md

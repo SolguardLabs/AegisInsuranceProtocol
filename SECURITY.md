@@ -1,78 +1,107 @@
-# Security Policy
+# Política de seguridad
 
-## Modelo De Seguridad
+## Versiones mantenidas
 
-AegisInsuranceProtocol modela un mercado de cobertura con capital aportado por underwriters.
-El contrato principal debe preservar estas propiedades:
+| Versión   | Estado      |
+| --------- | ----------- |
+| `1.0.x`   | Mantenida   |
+| `< 1.0.0` | Sin soporte |
 
-- el capital bloqueado por polizas no debe retirarse mientras respalde obligaciones activas;
-- las primas deben registrarse antes de emitir la poliza;
-- una poliza solo puede reclamar dentro de su ventana valida;
-- los claims requieren un incidente activo y una revision autorizada;
-- el pago de claims debe reducir capital y exposicion de los pools participantes;
-- las retiradas solo pueden ejecutarse contra capital libre;
-- los roles operativos deben quedar separados entre router, reviewer y keeper.
+## Comunicación responsable
 
-## Alcance
+Envía los hallazgos mediante un
+[aviso privado de seguridad](https://github.com/SolguardLabs/AegisInsuranceProtocol/security/advisories/new).
+No publiques detalles técnicos en issues, pull requests o discusiones antes de disponer de una
+corrección coordinada.
 
-El alcance de revision incluye:
+Incluye el commit afectado, precondiciones, transición económica, impacto cuantificado, prueba
+determinista y propuesta de regresión. No adjuntes claves, endpoints privados ni datos personales.
 
-- `src/AegisInsuranceProtocol.vy`;
-- el paquete `src/aegis_protocol/`;
-- pruebas en `tests/`;
-- scripts de CI y validacion local.
+## Fronteras de confianza
 
-Quedan fuera de alcance:
+- El owner configura productos, roles, treasury y límites globales.
+- El sponsor administra únicamente el estado y los límites de sus pools.
+- El guardian puede pausar; solo el owner puede reanudar.
+- El router distribuye exposición dentro de retención y capacidad disponibles.
+- El keeper valida señales de incidente y ejecuta settlements aprobados.
+- El reviewer decide sobre claims, pero no mueve capital directamente.
+- Los servicios Python consumen estado on-chain y no son fuente de verdad para balances.
+- Oráculos, evidence stores y relayers son entradas no confiables hasta su validación.
 
-- integraciones con oraculos reales;
-- bridges externos;
-- tokens ERC-20 de produccion;
-- interfaces web o dashboards;
-- despliegues en redes publicas.
+## Invariantes económicas
 
-## Validaciones Automatizadas
-
-La validacion local esperada es:
-
-```bash
-bash scripts/ci.sh
+```text
+0 <= lockedExposure <= capacityCeiling
+capacityCeiling = totalCapital × maxUtilizationBps / 10,000
+policy.activeExposure = retainedExposure + Σ cessions
+claim.amountPaid <= claim.amountApproved <= claim.amountRequested
 ```
 
-El script compila el contrato Vyper, ejecuta pruebas Python, compila los modulos auxiliares y
-verifica que `src/` permanezca dentro del rango de LOC del proyecto.
+Además:
 
-## Gestion De Dependencias
+- cada cession debe preservar la retención mínima del pool originador;
+- una retirada no puede atravesar `lockedExposure` ni `minCapital`;
+- cada payout reduce capital, pending claims y exposición en el mismo lote;
+- la suma de asignaciones activas debe reconciliar con el ledger agregado por pool;
+- los fees de protocolo no forman parte del capital disponible del pool;
+- un cambio de estado sensible debe producir un evento reconstruible.
 
-Las dependencias estan declaradas en `pyproject.toml` y se instalan con:
+## Capas de control
+
+```mermaid
+flowchart TB
+    ID["Identidad operativa"] --> RBAC["Roles separados"]
+    RBAC --> PAUSE["Circuit breaker"]
+    PAUSE --> LIMITS["Retención, utilización y capital floor"]
+    LIMITS --> ACCOUNTING["Accounting por pool y póliza"]
+    ACCOUNTING --> RECON["Reconciliación independiente"]
+    RECON --> STRESS["Capital stress y concentración"]
+    STRESS --> ALERTS["Alertas y respuesta"]
+```
+
+## Operación segura
+
+- Usa multisig y timelock en la cuenta owner de una integración persistente.
+- Separa cuentas de guardian, router, reviewer y keeper.
+- Serializa mutaciones por pool y asigna identificadores idempotentes a jobs.
+- Verifica exposición y pending claims antes y después de cada lote.
+- Pausa compras y retiradas ante gaps contables o incidentes sin consenso.
+- Mantén evidence hashes y decisiones en almacenamiento append-only.
+- Registra snapshots por epoch y compara contra el toolkit independiente.
+- Ancla releases al mismo SHA en `main`, `production` y el tag estable.
+
+## Validación automatizada
 
 ```bash
 python -m pip install -e ".[dev]"
+bash scripts/ci.sh
 ```
 
-Dependabot revisa dependencias `pip` y GitHub Actions semanalmente.
+El gate valida compilación Vyper, tamaño de runtime EIP-170, suite Boa, cobertura Python,
+compilación de módulos y tamaño de fuente. Para tags `v*`, GitHub Actions comprueba que el tag
+coincida con la versión de `pyproject.toml`.
 
-## Reporte Interno
+## Cadena de suministro
 
-Los reportes deben incluir:
+- Las versiones de Vyper, titanoboa, pytest y pytest-cov están fijadas.
+- Dependabot revisa pip y GitHub Actions semanalmente.
+- Los workflows reciben permiso de lectura sobre contenidos.
+- `.venv`, caches, coberturas, builds y artefactos no se versionan.
 
-- descripcion del comportamiento observado;
-- impacto economico;
-- pasos de reproduccion;
-- contratos o modulos afectados;
-- prueba o script minimo;
-- mitigacion propuesta.
+## Alcance
 
-No incluya claves privadas, endpoints de produccion ni datos de usuarios reales en reportes,
-issues o fixtures.
+Dentro de alcance:
 
-## Criterios De Cambios Sensibles
+- pricing, deducibles y fees;
+- accounting de capital, shares y exposición;
+- cessions y asignaciones multipartícipe;
+- incidentes, revisión y settlement de claims;
+- expiración, retiradas y solvencia;
+- roles, pausa, reporting y reconciliación.
 
-Un cambio requiere revision adicional si modifica:
+Fuera de alcance:
 
-- formulas de primas o deducibles;
-- contabilidad de exposicion;
-- cesiones entre pools;
-- expiracion de polizas;
-- asignacion o liquidacion de claims;
-- permisos operativos;
-- retiradas de capital.
+- disponibilidad de proveedores externos;
+- custodia de claves de un integrador;
+- seguridad del host o del pipeline que consuma el paquete;
+- parámetros de riesgo aprobados explícitamente por gobierno.
