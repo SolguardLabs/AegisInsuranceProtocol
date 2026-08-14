@@ -29,5 +29,6 @@ PYTHON="$(find_python_with_pip)"
 "${PYTHON}" -m pip install -e ".[dev]"
 "${PYTHON}" -m compileall -q src
 "${PYTHON}" -m vyper -f abi src/AegisInsuranceProtocol.vy >/dev/null
-"${PYTHON}" -m pytest
-bash scripts/check-loc.sh
+"${PYTHON}" scripts/check_contract_size.py
+"${PYTHON}" -m pytest --cov=aegis_protocol --cov-report=term-missing
+"${PYTHON}" scripts/check_loc.py

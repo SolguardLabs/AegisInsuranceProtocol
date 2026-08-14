@@ -65,8 +65,8 @@ def protocol(accounts):
 
 @pytest.fixture
 def funded_market(protocol, accounts):
-    pool_a = protocol.create_pool(b32("Senior A"), b32("EU"), 0, 9000, 7000)
-    pool_b = protocol.create_pool(b32("Specialty B"), b32("EU"), 0, 9000, 7000)
+    pool_a = protocol.create_pool(b32("Senior A"), b32("EU"), 0, 9000, 5000)
+    pool_b = protocol.create_pool(b32("Specialty B"), b32("EU"), 0, 9000, 5000)
 
     with boa.env.prank(accounts["underwriter"]):
         protocol.deposit_capital(pool_a, accounts["underwriter"], value=1_000 * ETHER)

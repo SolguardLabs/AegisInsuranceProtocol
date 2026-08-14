@@ -1,116 +1,177 @@
+<p align="center">
+  <img src="./assets/banner.png" alt="AegisInsuranceProtocol" width="100%" />
+</p>
+
+<p align="center">
+  <a href="https://github.com/SolguardLabs/AegisInsuranceProtocol/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/SolguardLabs/AegisInsuranceProtocol/actions/workflows/ci.yml/badge.svg" /></a>
+  <a href="https://github.com/SolguardLabs/AegisInsuranceProtocol/releases"><img alt="Release" src="https://img.shields.io/github/v/release/SolguardLabs/AegisInsuranceProtocol?display_name=tag" /></a>
+  <img alt="Vyper 0.4.3" src="https://img.shields.io/badge/Vyper-0.4.3-3c3c3d" />
+  <img alt="Python 3.13" src="https://img.shields.io/badge/Python-3.13-3776ab" />
+  <a href="./LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-f2eadf" /></a>
+</p>
+
 # AegisInsuranceProtocol
 
-![banner](./assets/banner.png)
+Aegis es una infraestructura de cobertura DeFi para organizar capital de underwriters, productos
+asegurables, pólizas, cesiones entre pools especializados y liquidación de claims. El contrato
+Vyper conserva el estado económico y el paquete Python aporta pricing, revisión, reporting,
+reconciliación y cálculo de capital bajo estrés.
 
-AegisInsuranceProtocol es un mercado de seguros DeFi escrito en Vyper, con pruebas Python
-ejecutadas sobre una cadena local de Boa. El sistema permite a underwriters aportar capital,
-configurar productos de cobertura, emitir polizas, transferir exposicion entre pools
-especializados, presentar claims, aprobar pagos y retirar capital no comprometido.
+La versión `1.0.0` fija una interfaz operativa estable, separación de funciones, circuit breaker,
+límites de retención y capital, métricas de solvencia y un modelo actuarial determinista.
 
-> Estado del proyecto: software experimental. No usar con fondos reales sin revision
-> independiente, parametros operativos propios y controles adicionales.
+## Capacidades
 
-## Componentes
+- Pools segregados por sponsor, jurisdicción y política de utilización.
+- Capital de underwriting representado mediante shares internas 1:1.
+- Catálogo gobernado de productos, primas, deducibles y ventanas de claim.
+- Distribución de exposición entre un pool originador y hasta cuatro cesionarios.
+- Incidentes señalizados, evidencias, revisión y settlement multipartícipe.
+- Roles independientes de reviewer, router, keeper y guardian.
+- Pausa de emergencia con reanudación reservada al owner.
+- Snapshots de utilización y solvencia por epoch.
+- Pricing off-chain con observaciones de riesgo y ajustes de jurisdicción.
+- Stress testing correlacionado y reconciliación por póliza, pool y subject.
 
-| Componente | Responsabilidad |
-| --- | --- |
-| `src/AegisInsuranceProtocol.vy` | Contrato principal de pools, polizas, cesiones, claims y retiradas. |
-| `src/aegis_protocol/pricing.py` | Motor off-chain de primas, scores y observaciones de riesgo. |
-| `src/aegis_protocol/ledger.py` | Ledger operativo para escenarios, asignaciones y snapshots locales. |
-| `src/aegis_protocol/claims.py` | Reglas de revision de claims, evidencias y recomendaciones. |
-| `src/aegis_protocol/reporting.py` | Reportes CSV/Markdown de exposicion y solvencia. |
-| `src/aegis_protocol/scenarios.py` | Escenarios deterministas para pruebas y demos internas. |
+## Arquitectura
 
-## Flujos Principales
+```mermaid
+flowchart LR
+    UW["Underwriters"] -->|deposit / withdraw| POOL["Risk pools"]
+    HOLDER["Policy holders"] -->|premium| CORE["Contrato Vyper"]
+    CORE --> POOL
+    ROUTER["Exposure router"] -->|cession| CORE
+    ORACLE["Incident sources"] --> KEEPER["Keeper"]
+    KEEPER --> CORE
+    REVIEW["Claims review"] --> CORE
+    CORE -->|payout| BENEFICIARY["Beneficiary"]
+    CORE --> LENS["Snapshots on-chain"]
+    PY["Toolkit Python"] --> PRICE["Pricing"]
+    PY --> CAPITAL["Capital model"]
+    PY --> MONITOR["Reconciliation"]
+    LENS --> MONITOR
+```
 
-1. Un sponsor crea un pool de riesgo con limites de utilizacion.
-2. Underwriters depositan capital y reciben shares internas.
-3. Gobernanza configura productos de cobertura.
-4. Un usuario compra una poliza y paga la prima.
-5. El pool bloquea capacidad por la cobertura emitida.
-6. Un router puede ceder parte de la exposicion a otro pool activo.
-7. Un keeper registra incidentes admitidos.
-8. El beneficiario presenta un claim con evidencia.
-9. Revisores aprueban o rechazan el claim.
-10. Un keeper liquida el payout aprobado.
-11. Las polizas vencidas liberan capacidad.
-12. Underwriters retiran capital libre.
+La división evita introducir cálculos actuariales costosos en la EVM. El contrato aplica límites
+discretos y settlement; los servicios calculan escenarios, detectan gaps y preparan decisiones.
 
-## Requisitos
+## Modelo económico
 
-- Python 3.13.
+La capacidad admisible de un pool es:
+
+```text
+capacityCeiling = totalCapital × maxUtilizationBps / 10,000
+availableCapacity = max(capacityCeiling - lockedExposure, 0)
+freeCapital = max(totalCapital - lockedExposure, 0)
+```
+
+La prima combina tasa temporal y carga por utilización:
+
+```text
+timePremium = coverage × baseRateBps × durationDays / 365 / 10,000
+utilizationPremium = coverage × utilizationBps / 10,000 / 25
+premium = max(timePremium + utilizationPremium, minPremium)
+```
+
+El modelo de capital agrega pérdidas con correlación común:
+
+```text
+variance = Σ lossᵢ² + ρ × ((Σ lossᵢ)² - Σ lossᵢ²)
+correlatedLoss = √variance
+requiredCapital = correlatedLoss + concentrationCharge + expenseBuffer
+```
+
+Consulta [docs/economic-model.md](./docs/economic-model.md) para el waterfall completo y un
+ejemplo numérico.
+
+## Flujo de cobertura
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active: buy_policy
+    Active --> Active: transfer_policy_exposure
+    Active --> Submitted: submit_claim
+    Submitted --> Reviewed: mark_claim_reviewed
+    Submitted --> Approved: approve_claim
+    Reviewed --> Approved: approve_claim
+    Submitted --> Rejected: reject_claim
+    Reviewed --> Rejected: reject_claim
+    Approved --> Paid: settle_claim
+    Active --> Expired: expire_policy
+```
+
+## Inicio rápido
+
+Requisitos:
+
+- Python 3.13 o superior.
 - Vyper 0.4.3.
-- titanoboa 0.2.8.
-- pytest 8.4.2.
-
-## Instalacion
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
+bash scripts/ci.sh
 ```
 
-En Windows PowerShell:
+En PowerShell:
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
+.\scripts\ci.ps1
 ```
 
-## Uso
+El gate compila el contrato, comprueba el límite EIP-170, compila el paquete Python, ejecuta la
+suite con cobertura y valida el tamaño del árbol fuente.
 
-```bash
-# Compilar contrato Vyper
-python -m vyper -f abi src/AegisInsuranceProtocol.vy
+## Ejemplo actuarial
 
-# Ejecutar pruebas
-bash scripts/tests.sh
+```python
+from aegis_protocol import CapitalModel, ExposureCell
 
-# Validacion completa
-bash scripts/ci.sh
+assessment = CapitalModel().assess(
+    available_capital=1_500 * 10**18,
+    exposures=(
+        ExposureCell(1, "ETH-STABLE", "vault-alpha", 300 * 10**18, 900, 6_000),
+        ExposureCell(2, "RESTAKING", "operator-beta", 220 * 10**18, 1_200, 7_500),
+    ),
+)
 
-# Control de lineas fuente
-bash scripts/check-loc.sh
+print(assessment.required_capital)
+print(assessment.coverage_ratio_bps)
+print(assessment.shortfall)
 ```
 
-En Windows:
+## Señales operativas
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/tests.ps1
-powershell -ExecutionPolicy Bypass -File scripts/ci.ps1
-```
+| Señal                          | Interpretación                                      |
+| ------------------------------ | --------------------------------------------------- |
+| `EXPOSURE_MISMATCH`            | Ledger de pool y asignaciones de póliza no cuadran. |
+| `CLAIM_ALLOCATION_MISMATCH`    | Claims abiertos y reservas pendientes divergen.     |
+| `UTILIZATION_HIGH`             | La ocupación supera el umbral operativo.             |
+| `SOLVENCY_LOW`                 | Capital/obligaciones cae bajo el objetivo.           |
+| `CLAIM_BACKLOG_HIGH`           | Claims pendientes consumen demasiado capital.       |
+| `SUBJECT_CONCENTRATION_HIGH`   | Un subject domina la exposición del pool.            |
 
-## Estructura
+## Documentación
 
-```text
-.
-|-- src/
-|   |-- AegisInsuranceProtocol.vy
-|   `-- aegis_protocol/
-|       |-- claims.py
-|       |-- constants.py
-|       |-- ledger.py
-|       |-- models.py
-|       |-- pricing.py
-|       |-- reporting.py
-|       `-- scenarios.py
-|-- tests/
-|-- scripts/
-|-- .github/
-|-- .vscode/
-|-- pyproject.toml
-|-- README.md
-`-- SECURITY.md
-```
+- [Índice técnico](./docs/README.md)
+- [Arquitectura](./docs/architecture.md)
+- [Modelo económico y capital](./docs/economic-model.md)
+- [Underwriting y cesiones](./docs/underwriting.md)
+- [Claims](./docs/claims.md)
+- [Riesgo y seguridad](./docs/risk-and-security.md)
+- [Operación](./docs/operations.md)
+- [Integración](./docs/integration.md)
+- [Política de seguridad](./SECURITY.md)
 
-## Desarrollo Seguro
+## Versionado
 
-Los cambios que afecten a capital, exposicion, primas, vencimientos, claims o retiradas deben
-incluir pruebas de conservacion de saldos y pruebas con polizas sindicadas entre pools. Las
-incidencias y reportes de seguridad deben seguir el proceso descrito en [SECURITY.md](SECURITY.md).
+Las versiones estables siguen SemVer. El tag `v1.0.0`, la rama `production` y el release
+`Production 1.0.0` representan el mismo commit verificable.
 
 ## Licencia
 
-MIT. Consulte [LICENSE](LICENSE).
+Distribuido bajo [MIT](./LICENSE).
