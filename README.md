@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="./assets/banner.png" alt="AegisInsuranceProtocol" width="100%" />
-</p>
+<h1 align="center">AegisInsuranceProtocol</h1>
 
 <p align="center">
   <a href="https://github.com/SolguardLabs/AegisInsuranceProtocol/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/SolguardLabs/AegisInsuranceProtocol/actions/workflows/ci.yml/badge.svg" /></a>
@@ -10,7 +8,9 @@
   <a href="./LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-f2eadf" /></a>
 </p>
 
-# AegisInsuranceProtocol
+<p align="center">
+  <img src="./assets/banner.png" alt="AegisInsuranceProtocol" width="100%" />
+</p>
 
 Aegis es una infraestructura de cobertura DeFi para organizar capital de underwriters, productos
 asegurables, pólizas, cesiones entre pools especializados y liquidación de claims. El contrato
